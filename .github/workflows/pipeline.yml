@@ -45,9 +45,6 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: ${{ steps.config.outputs.node_version }}
-      - name: Install Linux native prerequisites
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libgtk-3-0 libdbus-glib-1-2 libasound2t64 zip unzip xz-utils
       - run: npm ci
         if: steps.config.outputs.mode == '2'
         working-directory: plugin
@@ -126,8 +123,9 @@ jobs:
         with:
           node-version: ${{ needs.prepare.outputs.node_version }}
       - name: Install Linux native prerequisites
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libgtk-3-0 libdbus-glib-1-2 libasound2t64 zip unzip xz-utils
+        if: runner.os == 'Linux' && needs.prepare.outputs.mode == '1'
+        timeout-minutes: 6
+        run: node --experimental-strip-types helper/scripts/install-linux.mts
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         if: needs.prepare.outputs.mode == '2'
         with:
@@ -203,7 +201,8 @@ jobs:
           node-version: ${{ needs.prepare.outputs.node_version }}
       - name: Install Linux native prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libgtk-3-0 libdbus-glib-1-2 libasound2t64 zip unzip xz-utils
+        timeout-minutes: 6
+        run: node --experimental-strip-types helper/scripts/install-linux.mts
       - name: Add Git unzip tools to Windows PATH
         if: runner.os == 'Windows'
         shell: pwsh
