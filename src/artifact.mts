@@ -12,8 +12,8 @@ import type { PluginConfig, ArtifactInfo, UpdateFeed, UpdateEntry } from './cont
 /** Compute a SHA-256 digest for exact supplied bytes. @param data Payload. @returns Lowercase hexadecimal digest. */
 function hash(data: Uint8Array): string { return createHash('sha256').update(data).digest('hex'); }
 
-/** Inspect immutable XPI file bytes and actual manifest identity/compatibility. @param xpi Archive path. @param config Adapter. @param expectedVersion Prepared version. @param options Historical mode admits the archive's own valid compatibility bounds. @returns File set, compatibility, per-entry digests and archive identity. */
-export async function inspectArtifact(xpi: string, config: PluginConfig, expectedVersion: string, options: { historical?: boolean } = {}): Promise<ArtifactInfo> {
+/** Inspect immutable XPI file bytes and actual manifest identity/compatibility. @param xpi Archive path. @param config Adapter. @param expectedVersion Prepared version. @param options Historical mode admits the archive's own valid compatibility bounds; updateURL optionally requires an exact packaged discovery URL in either mode. @returns File set, compatibility, per-entry digests and archive identity. */
+export async function inspectArtifact(xpi: string, config: PluginConfig, expectedVersion: string, options: { historical?: boolean; updateURL?: string } = {}): Promise<ArtifactInfo> {
   const stat = await lstat(xpi); assert.ok(stat.isFile() && !stat.isSymbolicLink(), 'XPI must be a regular nonsymlink file');
   const sha256 = hash(await readFile(xpi));
   const listing = execFileSync('unzip', ['-Z', '-l', xpi], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
@@ -33,6 +33,7 @@ export async function inspectArtifact(xpi: string, config: PluginConfig, expecte
   const compatibility = parseCompatibility({ min: native.strict_min_version, max: native.strict_max_version });
   if (!options.historical) assert.deepEqual(compatibility, compatibilityFor(config), 'Unsupported packaged compatibility bounds');
   https(native.update_url);
+  if (options.updateURL !== undefined) assert.equal(native.update_url, options.updateURL, 'Packaged update URL mismatch');
   assert.equal(hash(await readFile(xpi)), sha256, 'Archive mutated during inspection');
   return { sha256, version: expectedVersion, files, entries: digests, id: config.plugin.id, compatibility };
 }

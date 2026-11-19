@@ -15,7 +15,7 @@ export async function buildStage(root: string, output: string, config: PluginCon
  await runScript(root, config.scripts.validate, []);
  const xpi = join(output, `${config.plugin.slug}-${version}.xpi`);
  await runScript(root, config.scripts.build, ['--output', xpi]);
- const artifact = await inspectArtifact(xpi, config, version);
+ const artifact = await inspectArtifact(xpi, config, version, { updateURL: `https://github.com/${repo}/releases/latest/download/updates.json` });
  const manifest = JSON.parse(await readFile(join(root, config.versions.manifest), 'utf8')) as { applications: { zotero: { update_url: string } } };
  assert.equal(manifest.applications.zotero.update_url, `https://github.com/${repo}/releases/latest/download/updates.json`, 'Manifest requires stable release feed URL');
  return artifact;
@@ -25,7 +25,7 @@ export async function aggregateStage(state: BuildState, input: string, receipts:
  const acceptedReceipts = aggregateReceipts(state, receipts);
  assert.match(state.xpi, /^[\w.-]+\.xpi$/, 'Unsafe XPI transport name');
  assert.equal(await hashFile(join(input, state.xpi)), state.xpiSHA256, 'Aggregate XPI digest mismatch');
- const inspected = await inspectArtifact(join(input, state.xpi), state.config, state.version);
+ const inspected = await inspectArtifact(join(input, state.xpi), state.config, state.version, { updateURL: `https://github.com/${state.repo}/releases/latest/download/updates.json` });
  assert.deepEqual(inspected, state.artifact, 'Aggregate artifact observation mismatch');
  await mkdir(output, { recursive: false });
  await copyFile(join(input, state.xpi), join(output, state.xpi));

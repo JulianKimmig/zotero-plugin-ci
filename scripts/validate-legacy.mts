@@ -45,10 +45,10 @@ if (baseline) {
 await runScript(root, config.scripts.validate, []);
 const xpi = join(output, `${config.plugin.slug}-${version}.xpi`);
 await runScript(root, config.scripts.build, ['--output', xpi]);
-const accepted = await inspectArtifact(xpi, config, version);
+const accepted = await inspectArtifact(xpi, config, version, { updateURL: `https://github.com/${repo}/releases/latest/download/updates.json` });
 const executable = await installRuntime(config.runtime, join(output, 'runtime'));
 await runScript(root, config.scripts.native, ['--xpi', xpi, ...(previous ? ['--previous', previous] : [])], { ...process.env, ZOTERO_BIN: executable, ZOTERO_VERSION: config.runtime.version });
-if ((await inspectArtifact(xpi, config, version)).sha256 !== accepted.sha256) throw new Error('Native validation modified XPI');
+if ((await inspectArtifact(xpi, config, version, { updateURL: `https://github.com/${repo}/releases/latest/download/updates.json` })).sha256 !== accepted.sha256) throw new Error('Native validation modified XPI');
 const manifest = JSON.parse(await readFile(join(root, config.versions.manifest), 'utf8')) as { applications: { zotero: { update_url: string } } };
 if (manifest.applications.zotero.update_url !== `https://github.com/${repo}/releases/latest/download/updates.json`) throw new Error('Manifest requires stable release feed URL');
 const feed = Buffer.from(JSON.stringify(createUpdateFeed(config, version, accepted.sha256, repo, previousFeed), null, 2) + '\n');

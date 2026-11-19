@@ -52,6 +52,14 @@ an archive hash records the exact downloaded bytes and is not an independent
 upstream signature. Schema version 1 remains available for an exact, pre-hashed
 Linux runtime via its original `runtime` configuration.
 
+When the native adapter needs generated controllers or resources, declare their
+project-relative paths with optional `nativeTools`, for example
+`"nativeTools": ["dist"]`. The build job transports those portable files to each
+native runner under the same relative paths. There is no assumed output folder;
+omit the field when the adapter runs directly from checked-out source. Declared
+paths must exist after validation/build and cannot escape the plugin checkout or
+contain symlinks, account profiles, credentials, Git metadata or dependencies.
+
 The npm adapters accept these contracts:
 
 - `ci:validate`: validate the source and run its tests.

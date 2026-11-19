@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { fields, text, relativeFile, https, readObject, containedFile, object } from './validation.mts';
 import type { PluginConfig, Platform, Compatibility, CommonPluginConfig } from './contracts.mts';
+import { nativeToolPaths } from './native-tool-paths.mts';
 import { nativeParts, parseCompatibility, targetSelector } from './native-versions.mts';
 
 /** Validate the supported native platform enum. @param value External platform. @returns Typed platform. */
@@ -25,7 +26,7 @@ function uniqueList<T>(value: unknown, parse: (item: unknown) => T): T[] {
 export async function loadConfig(root: string, path = '.github/zotero-plugin.json'): Promise<PluginConfig> {
   const input = await readObject(root, path);
   assert.ok(input.schemaVersion === 1 || input.schemaVersion === 2, 'Unsupported CI configuration version');
-  const raw = fields(input, ['schemaVersion', 'plugin', 'nodeVersion', 'versions', 'scripts', ...(input.schemaVersion === 1 ? ['runtime'] : ['compatibility', 'targets', 'platforms'])], ['bootstrap']);
+  const raw = fields(input, ['schemaVersion', 'plugin', 'nodeVersion', 'versions', 'scripts', ...(input.schemaVersion === 1 ? ['runtime'] : ['compatibility', 'targets', 'platforms'])], ['bootstrap', ...(input.schemaVersion === 2 ? ['nativeTools'] : [])]);
   const plugin = fields(raw.plugin, ['id', 'slug']), versions = fields(raw.versions, ['package', 'lock', 'manifest']);
   const scripts = fields(raw.scripts, ['validate', 'build', 'native']);
   const common: CommonPluginConfig = {
@@ -42,7 +43,8 @@ export async function loadConfig(root: string, path = '.github/zotero-plugin.jso
     config = { ...common, schemaVersion: 1, runtime: { version, platform: 'linux-x64', url: https(runtime.url),
       sha256: text(runtime.sha256, /^[a-f0-9]{64}$/), executable: relativeFile(runtime.executable) } };
   } else config = { ...common, schemaVersion: 2, compatibility: parseCompatibility(raw.compatibility),
-    targets: uniqueList(raw.targets, targetSelector), platforms: uniqueList(raw.platforms, platform) };
+    targets: uniqueList(raw.targets, targetSelector), platforms: uniqueList(raw.platforms, platform),
+    ...(raw.nativeTools !== undefined ? { nativeTools: nativeToolPaths(raw.nativeTools) } : {}) };
   assert.equal(new Set(Object.values(config.versions)).size, 3, 'Version files must be distinct');
   for (const file of Object.values(config.versions)) await containedFile(root, file);
   const pkg = await readObject(root, config.versions.package), declared = object(pkg.scripts);

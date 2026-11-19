@@ -17,6 +17,8 @@ export interface LegacyPluginConfig extends CommonPluginConfig { schemaVersion: 
 /** Matrix selectors and plugin compatibility are deliberately independent. */
 export interface MatrixPluginConfig extends CommonPluginConfig {
   schemaVersion: 2; compatibility: Compatibility; targets: string[]; platforms: Platform[];
+  /** Explicit generated files/directories transported from the build host to native jobs. */
+  nativeTools?: string[];
 }
 /** Supported adapter generations, narrowed by schemaVersion. */
 export type PluginConfig = LegacyPluginConfig | MatrixPluginConfig;

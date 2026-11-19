@@ -146,10 +146,9 @@ jobs:
         env:
           MODE: ${{ needs.prepare.outputs.mode }}
           GITHUB_TOKEN: ${{ github.token }}
-      - name: Discover compiled native tools
+      - name: Stage declared generated native tools
         id: tools
-        run: |
-          if [ -d plugin/.build ]; then echo 'present=true' >> "$GITHUB_OUTPUT"; else echo 'present=false' >> "$GITHUB_OUTPUT"; fi
+        run: node --experimental-strip-types helper/scripts/native-tools.mts plugin "$RUNNER_TEMP/native-tools"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: built-plugin
@@ -160,7 +159,7 @@ jobs:
         if: needs.prepare.outputs.mode == '2' && steps.tools.outputs.present == 'true'
         with:
           name: native-tools
-          path: plugin/.build
+          path: ${{ runner.temp }}/native-tools
           if-no-files-found: error
           retention-days: 30
           include-hidden-files: true
@@ -230,7 +229,7 @@ jobs:
         if: needs.build.outputs.tools == 'true'
         with:
           name: native-tools
-          path: plugin/.build
+          path: plugin
       - run: npm ci
         working-directory: plugin
       - name: Qualify exact XPI in native host
