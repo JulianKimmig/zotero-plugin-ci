@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fixture, archive } from './core-fixture.mts';
 import { loadConfig } from '../src/config.mts';
-import { nextVersion, readVersion, prepareVersions } from '../src/versions.mts';
+import { nextVersion, readVersion, prepareVersions, assertPredecessor } from '../src/versions.mts';
 import { inspectArtifact, createUpdateFeed } from '../src/artifact.mts';
 
 test('loads a complete plugin configuration and matching versions', async () => {
@@ -98,4 +98,15 @@ test('update feed cannot regress below a previously published version', async ()
   const previous = createUpdateFeed(config, '1.0.0', 'a'.repeat(64), 'example/plugin', null);
   assert.throws(() => createUpdateFeed(config, '0.2.0', 'b'.repeat(64), 'example/plugin', previous), /older|regress/i);
   assert.deepEqual(createUpdateFeed(config, '1.0.0', 'a'.repeat(64), 'example/plugin', previous), previous);
+});
+
+test('predecessor ordering compares semantic components rather than version strings', () => {
+  assert.doesNotThrow(() => assertPredecessor('0.2.9', '0.10.0'));
+  assert.doesNotThrow(() => assertPredecessor('0.1.0', '0.1.1'));
+});
+
+test('same versions, downgrades and nonstable predecessors cannot prove an upgrade', () => {
+  for (const [previous, current] of [['0.1.1', '0.1.1'], ['1.0.0', '0.9.9'], ['0.01.0', '0.2.0'], ['0.1.0-beta', '0.1.0']]) {
+    assert.throws(() => assertPredecessor(previous, current));
+  }
 });

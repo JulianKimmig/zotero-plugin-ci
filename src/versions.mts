@@ -11,6 +11,13 @@ export function versionParts(value: string): [number, number, number] {
   return [parts[0], parts[1], parts[2]];
 }
 
+/** Require an actual semantic upgrade before building a bootstrap or claiming native upgrade proof. @param previous Prior stable version. @param current New stable version. @returns Completion only for a strictly older predecessor. */
+export function assertPredecessor(previous: string, current: string): void {
+  const before = versionParts(previous), after = versionParts(current);
+  const index = before.findIndex((value, position) => value !== after[position]);
+  assert.ok(index >= 0 && before[index] < after[index], 'Upgrade requires a strictly older predecessor');
+}
+
 /** Calculate the selected bump, requiring at most one recognized release label. @param base Latest baseline. @param labels PR labels. @returns Next stable version. */
 export function nextVersion(base: string, labels: readonly string[]): string {
   const parts = versionParts(base), selected = labels.filter(label => label.startsWith('release:'));

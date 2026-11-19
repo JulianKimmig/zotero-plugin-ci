@@ -3,7 +3,7 @@ import { resolve, join } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { loadConfig } from '../src/config.mts';
-import { readVersion } from '../src/versions.mts';
+import { readVersion, assertPredecessor } from '../src/versions.mts';
 import { inspectArtifact, createUpdateFeed } from '../src/artifact.mts';
 import { installRuntime } from '../src/runtime.mts';
 import { runScript } from '../src/runtime-adapter.mts';
@@ -37,6 +37,7 @@ if (baseline) {
   verifyPreviousHash(await readFile(previous), entry.update_hash);
   await inspectArtifact(previous, config, baseline.tag_name.replace(/^v/, ''));
 } else if (config.bootstrap) {
+  assertPredecessor(config.bootstrap.version, version);
   previous = join(output, 'previous.xpi');
   await buildBootstrap(root, config.bootstrap, previous, config);
 }
