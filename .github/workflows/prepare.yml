@@ -1,0 +1,41 @@
+# This privileged workflow checks out only the pinned helper, never plugin PR code.
+name: Prepare release version
+on:
+  workflow_call:
+    inputs:
+      helper_repository:
+        type: string
+        required: true
+      helper_commit:
+        type: string
+        required: true
+      pr_number:
+        type: number
+        required: true
+    secrets:
+      APP_ID:
+        required: true
+      APP_PRIVATE_KEY:
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: prepare-${{ github.repository }}
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ inputs.helper_repository }}
+          ref: ${{ inputs.helper_commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.17.0
+      - run: node --experimental-strip-types scripts/prepare.mts
+        env:
+          PR_NUMBER: ${{ inputs.pr_number }}
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
