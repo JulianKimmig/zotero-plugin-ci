@@ -1,0 +1,13 @@
+{
+  "name": "zotero-plugin-ci",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.17" },
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/*.test.mts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": { "@types/node": "22.20.1", "typescript": "5.9.3" }
+}
