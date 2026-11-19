@@ -1,4 +1,4 @@
-# Build/native checks use read-only credentials; publishing consumes only accepted bytes.
+# Read-only build-once pipeline; native jobs consume the exact same archives.
 name: Release plugin
 on:
   workflow_call:
@@ -15,74 +15,14 @@ concurrency:
   group: release-${{ github.repository }}
   cancel-in-progress: false
 jobs:
-  build:
+  aggregate:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          path: plugin
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          repository: ${{ inputs.helper_repository }}
-          ref: ${{ inputs.helper_commit }}
-          path: helper
-          persist-credentials: false
-      - name: Read configured Node version
-        id: config
-        run: |
-          node_version=$(jq -er '.nodeVersion | select(type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))' plugin/.github/zotero-plugin.json)
-          echo "node_version=$node_version" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: ${{ steps.config.outputs.node_version }}
-      - run: sudo apt-get update && sudo apt-get install -y xvfb xauth libgtk-3-0 libdbus-glib-1-2 libasound2t64 zip unzip xz-utils
-      - run: npm ci
-        working-directory: plugin
-      - run: |
-          mkdir -p "$RUNNER_TEMP/diagnostics"
-          node --experimental-strip-types helper/scripts/validate.mts plugin "$RUNNER_TEMP/accepted" 2>&1 | tee "$RUNNER_TEMP/diagnostics/validation.log"
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-      - name: Sanitize diagnostics
-        id: sanitize
-        if: always()
-        run: |
-          node --input-type=module <<'JS'
-          import { readFile, writeFile } from 'node:fs/promises';
-          const path = process.env.RUNNER_TEMP + '/diagnostics/validation.log';
-          try {
-            let text = await readFile(path, 'utf8');
-            for (const key of ['GITHUB_TOKEN', 'GH_TOKEN']) {
-              if (process.env[key]) text = text.split(process.env[key]).join('[REDACTED]');
-            }
-            await writeFile(path, text);
-          } catch (error) { if (error.code !== 'ENOENT') throw error; }
-          JS
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always() && steps.sanitize.outcome == 'success'
-        with:
-          name: validation-diagnostics
-          path: ${{ runner.temp }}/diagnostics/validation.log
-          if-no-files-found: ignore
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: accepted-release
-          if-no-files-found: error
-          path: |
-            ${{ runner.temp }}/accepted/accepted.json
-            ${{ runner.temp }}/accepted/updates.json
-            ${{ runner.temp }}/accepted/release.json
-            ${{ runner.temp }}/accepted/SHA256SUMS
-            ${{ runner.temp }}/accepted/*-*.xpi
+    uses: ./.github/workflows/pipeline.yml
+    with:
+      helper_repository: ${{ inputs.helper_repository }}
+      helper_commit: ${{ inputs.helper_commit }}
   publish:
-    needs: build
+    needs: aggregate
     runs-on: ubuntu-24.04
     permissions:
       contents: write

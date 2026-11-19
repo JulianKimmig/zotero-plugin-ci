@@ -19,5 +19,5 @@ export async function buildBootstrap(root: string, baseline: { commit: string; v
   if (await readVersion(checkout, config) !== baseline.version) throw new Error('Bootstrap source version mismatch');
   await exec('npm', ['ci'], { cwd: checkout, maxBuffer: 8 * 1024 * 1024 });
   await runScript(checkout, 'build', ['--output', output]);
-  await inspectArtifact(output, config, baseline.version);
+  await inspectArtifact(output, config, baseline.version, { historical: true });
 }
