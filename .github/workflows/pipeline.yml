@@ -1,0 +1,351 @@
+# Read-only build-once pipeline; native jobs consume the exact same archives.
+name: Plugin validation pipeline
+on:
+  workflow_call:
+    inputs:
+      helper_repository:
+        type: string
+        required: true
+      helper_commit:
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      mode: ${{ steps.config.outputs.mode }}
+      node_version: ${{ steps.config.outputs.node_version }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: plugin
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ inputs.helper_repository }}
+          ref: ${{ inputs.helper_commit }}
+          path: helper
+          persist-credentials: false
+      - name: Read configured mode and Node version
+        id: config
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const config = JSON.parse(readFileSync('plugin/.github/zotero-plugin.json', 'utf8'));
+          if (![1, 2].includes(config.schemaVersion) || !/^\d+\.\d+\.\d+$/.test(config.nodeVersion)) throw new Error('Invalid configuration');
+          appendFileSync(process.env.GITHUB_OUTPUT, `mode=${config.schemaVersion}\nnode_version=${config.nodeVersion}\n`);
+          JS
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ steps.config.outputs.node_version }}
+      - name: Install Linux native prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libgtk-3-0 libdbus-glib-1-2 libasound2t64 zip unzip xz-utils
+      - run: npm ci
+        if: steps.config.outputs.mode == '2'
+        working-directory: plugin
+      - name: Freeze source, baseline and runtime matrix
+        id: resolve
+        if: steps.config.outputs.mode == '2'
+        run: |
+          mkdir -p "$RUNNER_TEMP/diagnostics"
+          node --experimental-strip-types helper/scripts/pipeline.mts prepare plugin "$RUNNER_TEMP/prepared" "$RUNNER_TEMP/built" 2>&1 | tee "$RUNNER_TEMP/diagnostics/validation.log"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.config.outputs.mode == '2'
+        with:
+          name: prepared-metadata
+          path: |
+            ${{ runner.temp }}/prepared/prepared.json
+            ${{ runner.temp }}/prepared/previous.xpi
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.config.outputs.mode == '2' && contains(steps.resolve.outputs.matrix, 'linux-x64')
+        with:
+          name: runtime-linux-x64
+          path: ${{ runner.temp }}/prepared/runtimes/linux-x64
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.config.outputs.mode == '2' && contains(steps.resolve.outputs.matrix, 'windows-x64')
+        with:
+          name: runtime-windows-x64
+          path: ${{ runner.temp }}/prepared/runtimes/windows-x64
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: steps.config.outputs.mode == '2' && contains(steps.resolve.outputs.matrix, 'macos-x64')
+        with:
+          name: runtime-macos-x64
+          path: ${{ runner.temp }}/prepared/runtimes/macos-x64
+          if-no-files-found: error
+          retention-days: 30
+      - name: Sanitize diagnostics
+        id: sanitize
+        if: always()
+        run: node --experimental-strip-types helper/scripts/sanitize.mts "$RUNNER_TEMP/diagnostics"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.sanitize.outcome == 'success'
+        with:
+          name: diagnostics-prepare
+          path: ${{ runner.temp }}/diagnostics
+          if-no-files-found: error
+          retention-days: 30
+  build:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    outputs:
+      tools: ${{ steps.tools.outputs.present }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: plugin
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ inputs.helper_repository }}
+          ref: ${{ inputs.helper_commit }}
+          path: helper
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ needs.prepare.outputs.node_version }}
+      - name: Install Linux native prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libgtk-3-0 libdbus-glib-1-2 libasound2t64 zip unzip xz-utils
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.prepare.outputs.mode == '2'
+        with:
+          name: prepared-metadata
+          path: ${{ runner.temp }}/prepared
+      - run: npm ci
+        working-directory: plugin
+      - name: Build and validate source once
+        run: |
+          mkdir -p "$RUNNER_TEMP/diagnostics"
+          if [ "$MODE" = 1 ]; then
+            node --experimental-strip-types helper/scripts/validate.mts plugin "$RUNNER_TEMP/built" 2>&1 | tee "$RUNNER_TEMP/diagnostics/validation.log"
+          else
+            node --experimental-strip-types helper/scripts/pipeline.mts build plugin "$RUNNER_TEMP/prepared" "$RUNNER_TEMP/built" 2>&1 | tee "$RUNNER_TEMP/diagnostics/validation.log"
+          fi
+        env:
+          MODE: ${{ needs.prepare.outputs.mode }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Discover compiled native tools
+        id: tools
+        run: |
+          if [ -d plugin/.build ]; then echo 'present=true' >> "$GITHUB_OUTPUT"; else echo 'present=false' >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: built-plugin
+          path: ${{ runner.temp }}/built
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: needs.prepare.outputs.mode == '2' && steps.tools.outputs.present == 'true'
+        with:
+          name: native-tools
+          path: plugin/.build
+          if-no-files-found: error
+          retention-days: 30
+          include-hidden-files: true
+      - name: Sanitize diagnostics
+        id: sanitize
+        if: always()
+        run: node --experimental-strip-types helper/scripts/sanitize.mts "$RUNNER_TEMP/diagnostics"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.sanitize.outcome == 'success'
+        with:
+          name: diagnostics-build
+          path: ${{ runner.temp }}/diagnostics
+          if-no-files-found: error
+          retention-days: 30
+  native:
+    needs: [prepare, build]
+    if: needs.prepare.outputs.mode == '2'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: plugin
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ inputs.helper_repository }}
+          ref: ${{ inputs.helper_commit }}
+          path: helper
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ needs.prepare.outputs.node_version }}
+      - name: Install Linux native prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth libgtk-3-0 libdbus-glib-1-2 libasound2t64 zip unzip xz-utils
+      - name: Add Git unzip tools to Windows PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $gitExe = (Get-Command git -ErrorAction Stop).Source
+          $gitRoot = Split-Path (Split-Path $gitExe -Parent) -Parent
+          $toolsPath = Join-Path $gitRoot 'usr/bin'
+          if (-not (Test-Path (Join-Path $toolsPath 'unzip.exe'))) { throw 'Git unzip is required' }
+          $toolsPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: prepared-metadata
+          path: ${{ runner.temp }}/prepared
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: runtime-${{ matrix.platform }}
+          path: ${{ runner.temp }}/prepared/runtimes/${{ matrix.platform }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: built-plugin
+          path: ${{ runner.temp }}/built
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.build.outputs.tools == 'true'
+        with:
+          name: native-tools
+          path: plugin/.build
+      - run: npm ci
+        working-directory: plugin
+      - name: Qualify exact XPI in native host
+        run: |
+          mkdir -p "$RUNNER_TEMP/diagnostics"
+          node --experimental-strip-types helper/scripts/pipeline.mts native plugin "$RUNNER_TEMP/prepared" "$RUNNER_TEMP/built" "$CELL_ID" 2>&1 | tee "$RUNNER_TEMP/diagnostics/validation.log"
+        env:
+          CELL_ID: ${{ matrix.id }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: receipt-${{ matrix.id }}
+          path: ${{ runner.temp }}/built/*.receipt.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Sanitize diagnostics
+        id: sanitize
+        if: always()
+        run: node --experimental-strip-types helper/scripts/sanitize.mts "$RUNNER_TEMP/diagnostics"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.sanitize.outcome == 'success'
+        with:
+          name: diagnostics-${{ matrix.id }}
+          path: ${{ runner.temp }}/diagnostics
+          if-no-files-found: error
+          retention-days: 30
+  aggregate:
+    needs: [prepare, build, native]
+    if: always() && needs.build.result == 'success' && (needs.native.result == 'success' || (needs.prepare.outputs.mode == '1' && needs.native.result == 'skipped'))
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: plugin
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ inputs.helper_repository }}
+          ref: ${{ inputs.helper_commit }}
+          path: helper
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ needs.prepare.outputs.node_version }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: built-plugin
+          path: ${{ runner.temp }}/built
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        if: needs.prepare.outputs.mode == '2'
+        with:
+          pattern: receipt-*
+          path: receipts
+          merge-multiple: false
+      - name: Admit complete evidence and freeze publication assets
+        run: |
+          mkdir -p "$RUNNER_TEMP/diagnostics"
+          if [ "$MODE" = 1 ]; then
+            node --experimental-strip-types helper/scripts/aggregate-legacy.mts "$RUNNER_TEMP/built" "$RUNNER_TEMP/accepted" 2>&1 | tee "$RUNNER_TEMP/diagnostics/validation.log"
+          else
+            node --experimental-strip-types helper/scripts/pipeline.mts aggregate plugin "$RUNNER_TEMP/built" "$RUNNER_TEMP/accepted" receipts 2>&1 | tee "$RUNNER_TEMP/diagnostics/validation.log"
+          fi
+        env:
+          MODE: ${{ needs.prepare.outputs.mode }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: accepted-release
+          path: ${{ runner.temp }}/accepted
+          if-no-files-found: error
+          retention-days: 30
+      - name: Sanitize diagnostics
+        id: sanitize
+        if: always()
+        run: node --experimental-strip-types helper/scripts/sanitize.mts "$RUNNER_TEMP/diagnostics"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always() && steps.sanitize.outcome == 'success'
+        with:
+          name: diagnostics-aggregate
+          path: ${{ runner.temp }}/diagnostics
+          if-no-files-found: error
+          retention-days: 30
+  summary:
+    needs: [prepare, build, native, aggregate]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: ${{ inputs.helper_repository }}
+          ref: ${{ inputs.helper_commit }}
+          path: helper
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.17.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: prepared-metadata
+          path: prepared
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: receipt-*
+          path: receipts
+          merge-multiple: false
+      - run: node --experimental-strip-types helper/scripts/summary.mts prepared receipts
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          NATIVE_RESULT: ${{ needs.native.result }}
+          AGGREGATE_RESULT: ${{ needs.aggregate.result }}

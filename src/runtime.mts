@@ -7,19 +7,18 @@ import { constants } from 'node:fs';
 import { join, relative, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 import { extractMac, extractWindows } from './runtime-archives.mts';
+import type { Platform, RuntimePin } from './contracts.mts';
 const exec = promisify(execFile);
-/** Supported native matrix operating systems and CPU architecture. */
-type Platform = 'linux-x64' | 'windows-x64' | 'macos-x64';
 /** Download identity before its bytes have been observed. */
-interface RuntimeDownload { version: string; platform: Platform; url: string; executable: string }
+type RuntimeDownload = Omit<RuntimePin, 'sha256'>;
 
-/** Require credential-free HTTPS download URLs before any network request. */
+/** Require credential-free HTTPS download URLs before any network request. @param value Download URL. @returns Completion for an admissible URL. */
 function downloadURL(value: string): void {
   const url = new URL(value);
   if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error('Runtime requires credential-free HTTPS');
 }
 
-/** Download one runtime exactly once and bind its immutable local archive to an observed SHA-256. */
+/** Download one runtime and bind its immutable archive to an observed SHA-256. @param runtime Resolved official identity. @param archive Exclusive output path. @returns Runtime pin for the exact downloaded bytes. */
 export async function freezeRuntime(runtime: RuntimeDownload, archive: string): Promise<RuntimeDownload & { sha256: string }> {
   downloadURL(runtime.url);
   const response = await fetch(runtime.url);
@@ -49,7 +48,7 @@ export function validateTarListing(listing: string): void {
     }
   }
 }
-/** Download a configured runtime into a fresh directory and return its executable path. */
+/** Install hash-bound runtime bytes into a fresh directory. @param runtime Runtime pin; absent platform preserves the original Linux-only API. @param destination Fresh owned installation directory. @param frozenArchive Existing frozen bytes, otherwise downloaded and verified. @returns Absolute validated executable path. */
 export async function installRuntime(runtime: { url: string; sha256: string; executable: string; platform?: Platform }, destination: string, frozenArchive?: string): Promise<string> {
   downloadURL(runtime.url);
   if (isAbsolute(runtime.executable) || /[\\:\x00-\x1f]/.test(runtime.executable)

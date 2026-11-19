@@ -17,3 +17,8 @@ test('script errors fail the pipeline', async () => {
   await writeFile(join(root, 'package.json'), JSON.stringify({ scripts: { validate: 'exit 7' } }));
   await assert.rejects(runScript(root, 'validate', []));
 });
+test('Windows npm uses Node plus npm CLI with literal script arguments', async () => {
+ const { npmInvocation } = await import('../src/runtime-adapter.mts');
+ assert.deepEqual(npmInvocation('win32', 'C:\\Program Files\\nodejs\\node.exe', 'ci:native', ['--xpi', 'C:\\spaces here\\current.xpi']), {
+ command: 'C:\\Program Files\\nodejs\\node.exe', args: ['C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js', 'run', 'ci:native', '--', '--xpi', 'C:\\spaces here\\current.xpi'] });
+});

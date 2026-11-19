@@ -51,3 +51,13 @@ test('requires the explicit historical build script', async () => {
   await assert.rejects(buildBootstrap(item.root, item.baseline, item.output, item.config));
   await assert.rejects(access(item.output));
 });
+test('bootstrap preserves historical installation bounds when the current plugin broadens compatibility', async () => {
+  const item = await legacy();
+  const { plugin, nodeVersion, versions, scripts } = item.config;
+  const config = { schemaVersion: 2 as const, plugin, nodeVersion, versions, scripts,
+    compatibility: { min: '10.0.7', max: '10.*' }, targets: ['10.latest.latest'], platforms: ['linux-x64' as const] };
+  await buildBootstrap(item.root, item.baseline, item.output, config);
+  const prior = await inspectArtifact(item.output, config, item.baseline.version, { historical: true });
+  assert.deepEqual(prior.compatibility, { min: '10.0.7', max: '10.0.7' });
+  await assert.rejects(inspectArtifact(item.output, config, item.baseline.version), /compatibility/);
+});

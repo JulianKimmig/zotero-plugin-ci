@@ -3,20 +3,19 @@
 Reusable GitHub workflows for version preparation, validation and publication of
 Zotero plugins. Node 22.17.0 runs the TypeScript entrypoints directly.
 
-Provide a plugin adapter at `.github/zotero-plugin.json` with schema version 1,
+Provide a plugin adapter at `.github/zotero-plugin.json` with schema version 2,
 plugin ID and slug, exact Node version, package/lock/manifest paths, declared npm
-script names, and an HTTPS Linux runtime archive with its SHA256 and executable
-path. The version files must agree. The manifest update URL must be
+script names, installation compatibility, native version selectors and platforms.
+The version files must agree. The manifest update URL must be
 `https://github.com/OWNER/PLUGIN/releases/latest/download/updates.json`.
 
 For example, a new plugin can use this complete adapter. Replace the example
 plugin identity and repository URL in its manifest with your own; provide the
-declared npm adapters and the three version files. The runtime pin below is the
-complete Zotero 10.0.7 Linux x86_64 archive.
+declared npm adapters and the three version files.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "plugin": { "id": "reading-tools@example.org", "slug": "reading-tools" },
   "nodeVersion": "22.17.0",
   "versions": {
@@ -29,34 +28,55 @@ complete Zotero 10.0.7 Linux x86_64 archive.
     "build": "ci:build",
     "native": "ci:native"
   },
-  "runtime": {
-    "version": "10.0.7",
-    "platform": "linux-x64",
-    "url": "https://download.zotero.org/client/release/10.0.7/Zotero-10.0.7_linux-x86_64.tar.xz",
-    "sha256": "ddf43b50413f00ea9ba863c7913a4f1350288c1e81b45c2aaf192227b67d9549",
-    "executable": "Zotero_linux-x86_64/zotero"
-  }
+  "compatibility": { "min": "10.0.7", "max": "10.*" },
+  "targets": ["10.0.latest", "10.latest.latest"],
+  "platforms": ["linux-x64", "windows-x64", "macos-x64"]
 }
 ```
 
 Set the package version, both lockfile version locations and manifest version
 to the same initial seed, for example `0.1.0`. Set `applications.zotero.id` in
-the manifest to `reading-tools@example.org`, both compatibility limits to
-`10.0.7`, and its update URL to
+the manifest to `reading-tools@example.org`, its compatibility minimum to
+`10.0.7`, maximum to `10.*`, and its update URL to
 `https://github.com/example/reading-tools/releases/latest/download/updates.json`
 for that example repository. This illustrates the configuration contract; it
 is not a ready-made plugin implementation.
+
+`10.0.latest` selects the latest stable patch in the 10.0 line;
+`10.latest.latest` selects the latest stable minor and patch within major 10.
+Exact native versions are also accepted for reproducing a particular run.
+Each selector resolves independently for each platform. Selectors resolving to
+the same platform and version share one native job, with both aliases retained
+in the report. Runtime versions and archive hashes are frozen for the run;
+an archive hash records the exact downloaded bytes and is not an independent
+upstream signature. Schema version 1 remains available for an exact, pre-hashed
+Linux runtime via its original `runtime` configuration.
 
 The npm adapters accept these contracts:
 
 - `ci:validate`: validate the source and run its tests.
 - `ci:build -- --output ABSOLUTE_XPI`: build exactly one production archive.
-- `ci:native -- --xpi ABSOLUTE_XPI [--previous ABSOLUTE_XPI]`: validate those
-  archive bytes in a dedicated native environment. `ZOTERO_BIN` identifies the
-  verified runtime. Without `--previous`, validate a fresh installation.
+- `ci:native -- --xpi ABSOLUTE_XPI [--previous ABSOLUTE_XPI] --result ABSOLUTE_JSON`:
+  validate those archive bytes in a dedicated native environment. `ZOTERO_BIN`
+  identifies the verified runtime and `ZOTERO_VERSION` its expected version.
+  The result must report the actual native version, OS, architecture, input
+  hashes, native exits and completed phases. Without `--previous`, validate a
+  fresh installation. When the predecessor requires an older host,
+  `--previous-runtime ABSOLUTE_EXECUTABLE` and `ZOTERO_PREVIOUS_VERSION` identify
+  that migration source runtime. Seed through the real predecessor there,
+  close it, and verify the candidate preserves the same profile's data on the
+  target runtime. Always exercise a separate fresh-install lifecycle.
 
 The script names are configurable. Declare every selected script in the plugin
 package. Native checks must use isolated profiles and must fail on failure.
+The structured result and migration-host protocol applies to schema version 2;
+schema version 1 retains its original native invocation and exit-code contract.
+The shared [native result validator](src/pipeline-native-proof.mts) defines the
+required schema-v2 observations. It checks separate fresh and migration journeys,
+native lifecycle completion, observed host versions, successful process exits,
+and hashes read from the actually installed archives. Each plugin's adapter also
+owns its domain assertions, such as relationship preservation or preference-pane
+registration; the shared helper does not prescribe that application behavior.
 
 To generate thin caller workflows, select the shared repository and a published,
 reviewed 40-character commit. From this helper checkout run:
@@ -103,7 +123,12 @@ that first promotion. It receives fresh-install native checks. Once a stable
 release exists, the published preceding-main baseline is mandatory.
 
 Validation builds the release XPI once, verifies its identity and compatibility,
-and passes the same bytes to native checks. Release publication uses a separate
+and passes the same bytes to every native matrix job. Every configured target
+must pass; a failing job does not cancel the remaining targets. Caller workflows
+also provide manual validation and a weekly Monday 04:17 UTC check of main.
+Neither scheduled nor manual validation publishes a release. Sanitized diagnostics
+and resolution records are retained for 30 days.
+Release publication uses a separate
 job with contents write permission and no plugin execution. It verifies uploaded
 asset bytes before publishing the draft as latest. Retries accept matching
 existing tags and assets and reject conflicts. Publication then verifies
@@ -118,6 +143,11 @@ node --experimental-strip-types scripts/validate.mts /absolute/plugin /absolute/
 node --experimental-strip-types scripts/publish.mts /absolute/accepted-directory
 node --experimental-strip-types scripts/prepare.mts
 ```
+
+For a single-platform configuration matching your computer, add
+`--resolution /absolute/saved-resolution.json` to the validation command to replay
+captured targets and verify their retained archive hashes. Local validation rejects
+matrices requiring another operating system; use GitHub Actions for those matrices.
 
 Validation requires `GITHUB_REPOSITORY`, `GITHUB_SHA` and a read token in
 `GITHUB_TOKEN`. Publication requires the matching repository and commit plus a

@@ -7,7 +7,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 const exec = promisify(execFile);
 
-/** Reject path aliases, traversal, absolute names and Windows alternate streams before extracting a ZIP. */
+/** Reject path aliases and escaping ZIP entries. @param entries Central-directory paths. @param verbose Unix modes from unzip. @returns Completion only for safe ordinary ZIP members. */
 export function validateZipListing(entries: readonly string[], verbose: string): void {
   assert.ok(entries.length > 0, 'Empty runtime ZIP');
   assert.ok(!/^l[rwxstST-]{9}\s/m.test(verbose), 'Refusing linked ZIP entry');
@@ -21,7 +21,7 @@ export function validateZipListing(entries: readonly string[], verbose: string):
   }
 }
 
-/** Require every app member, including resolved symbolic links, to remain within the application root. */
+/** Require resolved app members to remain contained. @param root Owned application bundle root. @returns Completion after validating every directory, file and link. */
 export async function validateApplicationTree(root: string): Promise<void> {
   const base = await realpath(root);
   /** Inspect one member without recursively following symbolic directories. @param path Absolute member. @returns Complete validated traversal. */
@@ -35,7 +35,7 @@ export async function validateApplicationTree(root: string): Promise<void> {
   await inspect(resolve(root));
 }
 
-/** Extract a portable Windows ZIP after inspecting its complete central directory. */
+/** Extract a portable Windows ZIP after inspecting its central directory. @param archive Verified frozen ZIP. @param destination Fresh owned directory. @returns Completed native extraction. */
 export async function extractWindows(archive: string, destination: string): Promise<void> {
   const options = { encoding: 'utf8' as const, maxBuffer: 32 * 1024 * 1024 };
   const [{ stdout: listing }, { stdout: verbose }] = await Promise.all([
@@ -45,7 +45,7 @@ export async function extractWindows(archive: string, destination: string): Prom
   await exec('unzip', ['-q', archive, '-d', destination], options);
 }
 
-/** Mount a macOS image read-only, validate and copy its application, and always detach the owned mount. */
+/** Mount an image read-only and copy its validated application. @param archive Verified frozen DMG. @param destination Fresh owned directory. @returns Completed extraction after detaching the owned mount. */
 export async function extractMac(archive: string, destination: string): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), 'zotero-dmg-')), mount = join(root, 'mount');
   await mkdir(mount);

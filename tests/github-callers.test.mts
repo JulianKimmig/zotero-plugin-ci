@@ -10,3 +10,9 @@ test('requires immutable shared commit', () => {
  assert.doesNotMatch(files['prepare.yml']!, /secrets: inherit/);
  for (const text of Object.values(files)) assert.match(text, /@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/);
 });
+test('validation callers offer weekly and manual validation without release triggers', () => {
+ const files = callers('owner/shared', 'a'.repeat(40));
+ assert.match(files['validate.yml']!, /cron: '17 4 \* \* 1'/);
+ assert.match(files['validate.yml']!, /workflow_dispatch:/);
+ assert.doesNotMatch(files['release.yml']!, /schedule:|workflow_dispatch:/);
+});
